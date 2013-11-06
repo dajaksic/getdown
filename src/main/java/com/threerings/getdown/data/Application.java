@@ -97,6 +97,7 @@ public class Application
          */
         public enum Step
         {
+        	LOCK(5),
             UPDATE_JAVA(10),
             VERIFY_METADATA(15, 65, 95),
             DOWNLOAD(40),

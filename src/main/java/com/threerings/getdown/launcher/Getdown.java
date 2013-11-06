@@ -5,6 +5,8 @@
 
 package com.threerings.getdown.launcher;
 
+import static com.threerings.getdown.Log.log;
+
 import java.awt.BorderLayout;
 import java.awt.Container;
 import java.awt.Cursor;
@@ -14,15 +16,6 @@ import java.awt.Image;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.image.BufferedImage;
-
-import javax.imageio.ImageIO;
-import javax.swing.AbstractAction;
-import javax.swing.ImageIcon;
-import javax.swing.JApplet;
-import javax.swing.JButton;
-import javax.swing.JFrame;
-import javax.swing.JLayeredPane;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -31,13 +24,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
-
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
-
 import java.security.cert.Certificate;
-
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -49,6 +39,14 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import javax.imageio.ImageIO;
+import javax.swing.AbstractAction;
+import javax.swing.ImageIcon;
+import javax.swing.JApplet;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLayeredPane;
+
 import ca.beq.util.win32.registry.RegistryKey;
 import ca.beq.util.win32.registry.RegistryValue;
 import ca.beq.util.win32.registry.RootKey;
@@ -57,9 +55,8 @@ import com.samskivert.swing.util.SwingUtil;
 import com.samskivert.text.MessageUtil;
 import com.samskivert.util.RunAnywhere;
 import com.samskivert.util.StringUtil;
-
-import com.threerings.getdown.data.Application.UpdateInterface.Step;
 import com.threerings.getdown.data.Application;
+import com.threerings.getdown.data.Application.UpdateInterface.Step;
 import com.threerings.getdown.data.Resource;
 import com.threerings.getdown.data.SysProps;
 import com.threerings.getdown.net.Downloader;
@@ -71,8 +68,6 @@ import com.threerings.getdown.util.LaunchUtil;
 import com.threerings.getdown.util.MetaProgressObserver;
 import com.threerings.getdown.util.ProgressObserver;
 import com.threerings.getdown.util.VersionUtil;
-
-import static com.threerings.getdown.Log.log;
 
 /**
  * Manages the main control for the Getdown application updater and deployment system.
@@ -108,7 +103,7 @@ public abstract class Getdown extends Thread
             // recovering from a security failure
         }
         try {
-            _msgs = ResourceBundle.getBundle("com.threerings.getdown.messages");
+            _msgs = ResourceBundle.getBundle("com.threerings.getdown.messages", new Locale("hr", "HR"));
         } catch (Exception e) {
             // welcome to hell, where java can't cope with a classpath that contains jars that live
             // in a directory that contains a !, at least the same bug happens on all platforms
@@ -371,8 +366,13 @@ public abstract class Getdown extends Thread
                 // now force our UI to be recreated with the updated info
                 createInterface(true);
             }
+            
+            log.info("Attempting to lock...");
+            setStep(Step.LOCK);
+            updateStatus("m.locking");
             if (!_app.lockForUpdates()) {
-                throw new MultipleGetdownRunning();
+            	log.info("lock message");
+            	acquireLock();           
             }
 
             // Update the config modtime so a sleeping getdown will notice the change.
@@ -868,7 +868,7 @@ public abstract class Getdown extends Thread
                     _container.add(_layers, BorderLayout.CENTER);
                     _patchNotes = new JButton(new AbstractAction(
                             _msgs.getString("m.patch_notes")) {
-                        @Override public void actionPerformed (ActionEvent event) {
+                        public void actionPerformed (ActionEvent event) {
                             showDocument(_ifc.patchNotesUrl);
                         }
                     });
@@ -881,7 +881,7 @@ public abstract class Getdown extends Thread
                         _playAgain.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                         _playAgain.setFont(StatusPanel.FONT);
                         _playAgain.addActionListener(new ActionListener() {
-                            @Override public void actionPerformed (ActionEvent event) {
+                            public void actionPerformed (ActionEvent event) {
                                 _playAgain.setVisible(false);
                                 _stepMinPercent = _lastGlobalPercent = 0;
                                 EventQueue.invokeLater(new Runnable() {
@@ -1189,6 +1189,33 @@ public abstract class Getdown extends Thread
 
         protected URL _url;
     }
+    
+	private void acquireLock() throws InterruptedException,
+			MultipleGetdownRunning {
+
+		try {
+			int tryCount = 0;
+
+			while (tryCount < LOCK_NUM_OF_RETRIES) {
+				if (_app.lockForUpdates()) {
+					// lock file je uspješno kreiran
+					log.warning("lock file je uspješno kreiran");
+					return;
+				} else {
+					tryCount++;
+					Thread.sleep(LOCK_TRY_TIMEOUT);
+				}
+			}
+		} catch (InterruptedException e) {
+			log.warning("Greška kod pokušaja postavljanja locka-a", e);
+			throw e;
+		}
+
+		// Nije uspjelo kreiranje sync. datoteke u zadanom vremenu
+		throw new MultipleGetdownRunning();
+
+
+	}
 
     /** Used to pass progress on to our user interface. */
     protected ProgressObserver _progobs = new ProgressObserver() {
@@ -1231,4 +1258,9 @@ public abstract class Getdown extends Thread
     protected static final long PLAY_AGAIN_TIME = 3000L;
     protected static final String PROXY_REGISTRY =
         "Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+    
+    private static int LOCK_TRY_TIMEOUT = 2500;		// Vrijeme u milisekundama između dva uzastopna pokušaja kreiranja lock filea
+	private static int LOCK_NUM_OF_RETRIES = 180;	// Ukupan broj pokušaja kreiranja lock filea. Ako se ne uspije, onda se cijeli proces abortira.
+
+	
 }
