@@ -200,7 +200,7 @@ public class LaunchUtil
         }
 
         if (!windebug) {
-            vmpath = vmbase + "javaw.exe";
+            vmpath = vmbase + "jmoneta.exe";
             if (new File(vmpath).exists()) {
                 return vmpath;
             }
