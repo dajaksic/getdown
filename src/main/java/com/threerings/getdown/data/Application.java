@@ -50,6 +50,7 @@ import java.util.regex.Pattern;
 import javax.swing.JApplet;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.io.FileUtils;
 
 import com.samskivert.io.StreamUtil;
 import com.samskivert.text.MessageUtil;
@@ -57,7 +58,6 @@ import com.samskivert.util.ArrayUtil;
 import com.samskivert.util.RandomUtil;
 import com.samskivert.util.RunAnywhere;
 import com.samskivert.util.StringUtil;
-
 import com.threerings.getdown.launcher.RotatingBackgrounds;
 import com.threerings.getdown.util.ConfigUtil;
 import com.threerings.getdown.util.ConnectionUtil;
@@ -321,7 +321,7 @@ public class Application
     {
         Boolean active = _auxactive.get(auxgroup);
         if (active == null) {
-            // TODO: compare the contents with the MD5 hash of the auxgroup name and the client's
+            // TODO: compare the contents with the MD5 hash of the auxgroup name and the client's 
             // machine ident
             active = getLocalPath(auxgroup + ".dat").exists();
             _auxactive.put(auxgroup, active);
@@ -877,6 +877,18 @@ public class Application
             }
         }
     }
+    
+    /**
+     * Invokes the process associated with this application definition.
+     *
+     * @param optimum whether or not to include the set of optimum arguments (as opposed to falling
+     * back).
+     */
+    public Process createProcess (boolean optimum) 
+    	throws IOException
+    {
+    	return createProcess (optimum, false);
+    }
 
     /**
      * Invokes the process associated with this application definition.
@@ -884,16 +896,30 @@ public class Application
      * @param optimum whether or not to include the set of optimum arguments (as opposed to falling
      * back).
      */
-    public Process createProcess (boolean optimum)
+    public Process createProcess (boolean optimum, boolean newVersionCreateNewFolder)
         throws IOException
     {
+    	String activeFolderName = fetchActiveFolderName();
+    	
+    	if (newVersionCreateNewFolder) { 		
+    		
+    		activeFolderName = fetchNewFolderName();
+    		
+    		createAndCleanFolderIfNeeded(activeFolderName);
+    		
+    		copyResourcesToNewFolder(activeFolderName);
+    	
+    		insertNewActiveFolderNameInTheFile(activeFolderName);   		
+    	}
+    	
         // create our classpath
         StringBuilder cpbuf = new StringBuilder();
         for (Resource rsrc : getActiveCodeResources()) {
             if (cpbuf.length() > 0) {
                 cpbuf.append(File.pathSeparator);
             }
-            cpbuf.append(rsrc.getLocal().getAbsolutePath());
+            
+            cpbuf.append(fetchFullPathOfNewFolderOfResources(activeFolderName, rsrc.getPath()));          
         }
 
         ArrayList<String> args = new ArrayList<String>();
@@ -960,7 +986,129 @@ public class Application
         log.info("Running " + StringUtil.join(sargs, "\n  "));
 
         return Runtime.getRuntime().exec(sargs, envp, _appdir);
+
+    }   
+  
+    
+    private String fetchNewFolderName() throws IOException {
+    	
+    	String activeFolderName = fetchActiveFolderName();
+    	
+    	String newFolderName = null;
+    	
+    	if (activeFolderName != null) {
+			int fn = Integer.parseInt(activeFolderName.trim());
+			fn++;
+			if (fn == 4+1) {				
+				fn = 1;
+			}
+			newFolderName = Integer.toString(fn);
+		} else {
+			log.error("Can't fetch folder name ");
+			throw new IOException("Can't fetch folder name ");			
+		}
+    	
+    	return newFolderName;    	
     }
+    
+    private String fetchActiveFolderName() throws IOException {
+
+    	
+    	File file = new File(_appdir.getPath() + "\\activeFolder.txt"); 
+    	
+    	String folderName = null;
+
+    	// Does the file already exist 
+    	if(!file.exists()) 
+    	{ 
+    	  try 
+    	  { 
+    	    // Try creating the file 
+    	    file.createNewFile();
+    	    folderName = "1";
+    	    FileUtils.writeStringToFile(file, folderName);    	   
+    	  } 
+    	  catch(IOException ioe) 
+    	  { 
+    		  log.error("Create new file and write String to file ", ioe);
+    		  throw ioe;
+    	  } 
+    	} else {
+    		try {
+    			folderName = FileUtils.readFileToString(file);    			
+			} catch (IOException e) {
+				log.error("Read File to String ", e);
+				throw e;
+			}
+    	}    	
+    	return folderName;	
+    }
+
+	private void createAndCleanFolderIfNeeded(String directoryName) throws IOException {	
+
+		File theDir = new File(_appdir.getPath() + "\\" + directoryName);
+
+		// if the directory does not exist, create it
+		if (!theDir.exists()) {
+			log.info("creating directory: " + _appdir.getPath() + "\\" + directoryName);
+			theDir.mkdir();
+		} else {
+			try {
+				log.info("cleaning directory: " + _appdir.getPath() + "\\" + directoryName);
+				FileUtils.cleanDirectory(theDir);
+			} catch (IOException e) {				
+				log.error("Clean directory ", e);
+				throw e;
+			}
+		}
+	}
+	
+	private void copyResourcesToNewFolder(final String folderName) throws IOException {
+		StringBuilder appdir = new StringBuilder();
+		appdir.append(_appdir.getPath() + File.separator + folderName + File.separator);
+		for (Resource rsrc : getActiveCodeResources()) {
+			try {
+				String dest = appdir
+						+ rsrc.getPath().substring(0,
+								rsrc.getPath().lastIndexOf("/") + 1);
+				FileUtils.copyFileToDirectory(rsrc.getLocal(), new File(dest));
+			} catch (IOException e) {
+				log.error("Copy resources to new folder ", e);
+				throw e;
+			}
+		}
+	}
+	
+	private void insertNewActiveFolderNameInTheFile(String folderName) throws IOException {
+		File file = new File(_appdir.getPath() + "\\activeFolder.txt");
+		
+		try {
+			FileUtils.writeStringToFile(file, folderName);
+		} catch (IOException e) {			
+			log.error("Copy resources to new folder ", e);
+			throw e;
+		}		
+	}
+	
+	String fetchFullPathOfNewFolder(String folderName) {
+		StringBuilder appdir = new StringBuilder();
+		appdir.append(_appdir.getPath() + File.separator + folderName
+				+ File.separator);
+
+		return appdir.toString();
+	}
+	
+	String fetchFullPathOfNewFolderOfResources(String folderName, String resource) {
+		StringBuilder appdir = new StringBuilder();
+
+		appdir.append(_appdir.getPath() + File.separator + folderName
+				+ File.separator);
+		appdir.append(resource);
+
+		String path = appdir.toString();	
+
+		return path;
+	}
 
     /**
      * If the application provided environment variables, combine those with the current

@@ -21,7 +21,6 @@ import java.net.Socket;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
-
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
@@ -145,7 +144,11 @@ public class GetdownApplet extends JApplet
                             log.warning("Failed to start connect server.", e);
                         }
                     }
-                    super.launch();
+                    try {
+						super.launch();
+					} catch (Exception e) {
+						log.error("Failed to launch applet  ", e);
+					}
                 }
                 @Override
                 protected void exit (int exitCode) {

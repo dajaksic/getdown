@@ -747,12 +747,15 @@ public abstract class Getdown extends Thread
             }
             throw new MultipleGetdownRunning();
         }
+        
+        _newVersionCreateNewFolder = true;
     }
 
     /**
      * Called to launch the application if everything is determined to be ready to go.
+     * @throws Exception 
      */
-    protected void launch ()
+    protected void launch () throws Exception
     {
         setStep(Step.LAUNCH);
         setStatus("m.launching", stepToGlobalPercent(100), -1L, false);
@@ -769,7 +772,7 @@ public abstract class Getdown extends Thread
                 Process proc;
                 if (_app.hasOptimumJvmArgs()) {
                     // if we have "optimum" arguments, we want to try launching with them first
-                    proc = _app.createProcess(true);
+                    proc = _app.createProcess(true, _newVersionCreateNewFolder);
 
                     long fallback = System.currentTimeMillis() + FALLBACK_CHECK_TIME;
                     boolean error = false;
@@ -784,10 +787,10 @@ public abstract class Getdown extends Thread
 
                     if (error) {
                         log.info("Failed to launch with optimum arguments; falling back.");
-                        proc = _app.createProcess(false);
+                        proc = _app.createProcess(false, _newVersionCreateNewFolder);
                     }
                 } else {
-                    proc = _app.createProcess(false);
+                    proc = _app.createProcess(false, _newVersionCreateNewFolder);
                 }
 
                 // close standard in to avoid choking standard out of the launched process
@@ -845,6 +848,7 @@ public abstract class Getdown extends Thread
 
         } catch (Exception e) {
             log.warning("launch() failed.", e);
+            throw e;
         }
     }
 
@@ -1238,8 +1242,10 @@ public abstract class Getdown extends Thread
 
     protected boolean _dead;
     protected boolean _silent;
-    protected boolean _launchInSilent;
+    protected boolean _launchInSilent;    
     protected long _startup;
+    
+    protected boolean _newVersionCreateNewFolder = false;
 
     protected boolean _enableTracking = true;
     protected int _reportedProgress = 0;
