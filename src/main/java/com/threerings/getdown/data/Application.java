@@ -5,6 +5,8 @@
 
 package com.threerings.getdown.data;
 
+import static com.threerings.getdown.Log.log;
+
 import java.awt.Color;
 import java.awt.Rectangle;
 import java.io.BufferedReader;
@@ -16,6 +18,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.RandomAccessFile;
 import java.lang.reflect.Method;
@@ -33,16 +36,18 @@ import java.security.PermissionCollection;
 import java.security.Permissions;
 import java.security.Signature;
 import java.security.cert.Certificate;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map.Entry;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -67,8 +72,6 @@ import com.threerings.getdown.util.MetaProgressObserver;
 import com.threerings.getdown.util.ProgressObserver;
 import com.threerings.getdown.util.VersionUtil;
 
-import static com.threerings.getdown.Log.log;
-
 /**
  * Parses and provide access to the information contained in the <code>getdown.txt</code>
  * configuration file.
@@ -87,6 +90,8 @@ public class Application
 
     /** Suffix used for control file signatures. */
     public static final String SIGNATURE_SUFFIX = ".sig";
+    
+    public static final String folderWithVersions = "verzije";
 
     /** Used to communicate information about the UI displayed when updating the application. */
     public static class UpdateInterface
@@ -896,20 +901,32 @@ public class Application
      * @param optimum whether or not to include the set of optimum arguments (as opposed to falling
      * back).
      */
-    public Process createProcess (boolean optimum, boolean newVersionCreateNewFolder)
+    public Process createProcess (boolean optimum, boolean newVersionAndCreateNewFolder)
         throws IOException
-    {
-    	String activeFolderName = fetchActiveFolderName();
+    {   	   
     	
-    	if (newVersionCreateNewFolder) { 		
+    	String activeFolderName = null;
+    	
+    	//da li nova verzija
+    	if (newVersionAndCreateNewFolder) {    		
     		
+    		//dohvati novo ime aktivnog foldera
     		activeFolderName = fetchNewFolderName();
     		
-    		createAndCleanFolderIfNeeded(activeFolderName);
+    		//kreiraj folder s novim imenom
+    		createAppFolder(activeFolderName);
     		
+    		//kopiraj resurse u novi folder
     		copyResourcesToNewFolder(activeFolderName);
     	
-    		insertNewActiveFolderNameInTheFile(activeFolderName);   		
+    		//insertaj novo ime aktivnog foldera u datoteku
+    		insertNewActiveFolderNameInTheFile(activeFolderName);
+    		
+    		//pokušaj obrisati stare aktivne foldere
+    		tryDeleteOldFolders();
+    		
+    	} else {
+    		activeFolderName = fetchActiveFolderName();
     	}
     	
         // create our classpath
@@ -994,57 +1011,73 @@ public class Application
     	
     	String activeFolderName = fetchActiveFolderName();
     	
-    	String newFolderName = null;
-    	
-    	if (activeFolderName != null) {
-			int fn = Integer.parseInt(activeFolderName.trim());
-			fn++;
-			if (fn == 4+1) {				
-				fn = 1;
-			}
-			newFolderName = Integer.toString(fn);
-		} else {
-			log.error("Can't fetch folder name ");
-			throw new IOException("Can't fetch folder name ");			
-		}
-    	
+    	String  newFolderName = createNameForNewActiveFolder(activeFolderName);
+
     	return newFolderName;    	
     }
     
-    private String fetchActiveFolderName() throws IOException {
+	private String fetchActiveFolderName() throws IOException {
 
-    	
-    	File file = new File(_appdir.getPath() + "\\activeFolder.txt"); 
-    	
-    	String folderName = null;
+		File fileActiveFolder = new File(_appdir.getPath()
+				+ "\\activeFolder.txt");
 
-    	// Does the file already exist 
-    	if(!file.exists()) 
-    	{ 
-    	  try 
-    	  { 
-    	    // Try creating the file 
-    	    file.createNewFile();
-    	    folderName = "1";
-    	    FileUtils.writeStringToFile(file, folderName);    	   
-    	  } 
-    	  catch(IOException ioe) 
-    	  { 
-    		  log.error("Create new file and write String to file ", ioe);
-    		  throw ioe;
-    	  } 
-    	} else {
-    		try {
-    			folderName = FileUtils.readFileToString(file);    			
+		String folderName = null;
+
+		// Does the file already exist
+		if (!fileActiveFolder.exists()) {
+			try {
+				// Try creating the file
+				fileActiveFolder.createNewFile();
+
+			} catch (IOException ioe) {
+				log.error("Create new file and write String to file ", ioe);
+				throw ioe;
+			}
+		} else {
+			try {
+				folderName = FileUtils.readFileToString(fileActiveFolder);
 			} catch (IOException e) {
 				log.error("Read File to String ", e);
 				throw e;
 			}
-    	}    	
-    	return folderName;	
-    }
+		}
+		return folderName;
+	}
+    
+	private String createNameForNewActiveFolder(String oldName) {
 
-	private void createAndCleanFolderIfNeeded(String directoryName) throws IOException {	
+		String dateFormat = "yyyyMMdd";		
+		SimpleDateFormat sdfSource = new SimpleDateFormat(dateFormat);
+		
+		StringBuffer newNameSB = new StringBuffer();
+
+		String newDate = sdfSource.format(new Date());
+
+		String oldDate = null;
+				
+		if (oldName != null) {
+			oldName.substring(oldName.lastIndexOf("/") + 1);			
+			oldDate = oldName.substring(0, 7);	
+		}		
+		
+		newNameSB.append(Application.folderWithVersions);
+		newNameSB.append(File.pathSeparator);
+		
+		if (newDate.equals(oldDate)) {
+			int index = Character.getNumericValue(oldName.charAt(8));
+			index++;
+			newNameSB.append(oldDate);
+			newNameSB.append(index);
+
+		} else {
+			newNameSB.append(newDate);
+			newNameSB.append(1);
+		}
+
+		return newNameSB.toString();
+	}
+
+	private void createAppFolder(String directoryName) throws IOException {	
 
 		File theDir = new File(_appdir.getPath() + "\\" + directoryName);
 
@@ -1053,6 +1086,7 @@ public class Application
 			log.info("creating directory: " + _appdir.getPath() + "\\" + directoryName);
 			theDir.mkdir();
 		} else {
+			//ne bi smio uci
 			try {
 				log.info("cleaning directory: " + _appdir.getPath() + "\\" + directoryName);
 				FileUtils.cleanDirectory(theDir);
@@ -1079,6 +1113,44 @@ public class Application
 		}
 	}
 	
+	private void copyFile(final File outFile, final File inFile) {
+		
+		InputStream in = null;
+		OutputStream out = null;
+		byte[] _buffer = new byte[4096];
+		
+		try {
+			in = new FileInputStream(inFile);
+			out = new FileOutputStream(outFile);
+			
+			int read;
+
+			// read in the file data
+			while ((read = in.read(_buffer)) != -1) {
+				// write it out to our local copy
+				out.write(_buffer, 0, read);
+
+				// if we have no observer, then don't bother computing download
+				// statistics
+//			if (_obs == null) {
+//				continue;
+//			}
+//
+//			// note that we've downloaded some data
+//			currentSize += read;
+//			updateObserver(rsrc, currentSize, actualSize);
+			}
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		System.out.println("Kopirano!");
+		
+	} 
+	
 	private void insertNewActiveFolderNameInTheFile(String folderName) throws IOException {
 		File file = new File(_appdir.getPath() + "\\activeFolder.txt");
 		
@@ -1088,6 +1160,28 @@ public class Application
 			log.error("Copy resources to new folder ", e);
 			throw e;
 		}		
+	}
+	
+	private void tryDeleteOldFolders() {
+		List<String> results = new ArrayList<String>();		
+		File[] files = new File(_appdir.getPath() + "\\" + Application.folderWithVersions).listFiles();
+
+		for (File file : files) {
+		    if (file.isDirectory()) {
+		        results.add(file.getName());
+		    }
+		}	
+		
+		Collections.sort(results, String.CASE_INSENSITIVE_ORDER);
+		
+		if (results != null && results.size() > 3) {
+			for (int i = 2; i < results.size(); i++) {
+				// TODO probaj brisati , ako ide obriši sve
+			}
+		}
+		
+		System.out.println(results);
+		
 	}
 	
 	String fetchFullPathOfNewFolder(String folderName) {
